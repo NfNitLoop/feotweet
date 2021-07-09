@@ -1,0 +1,21 @@
+[twitter]
+# Create an app at: https://developer.twitter.com/en/apps
+# Then put tokens here:
+
+# AKA: "API token"
+consumerKey = ""
+# AKA: "API Secret Key"
+consumerSecret = ""
+
+# AKA: "Authentication Tokens"
+accessTokenKey = ""
+accessTokenSecret = ""
+
+[feoblog]
+server = "http://127.0.0.1:8080"
+
+[feoblog.write]
+# will write tweets into FeoBlog on this blog:
+userID = ""
+password = ""
+
