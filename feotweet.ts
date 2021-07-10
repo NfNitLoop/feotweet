@@ -18,9 +18,9 @@ async function main(): Promise<number> {
             continue
         }
 
-
         console.log("tweet:")
-        console.log(tweet.toMarkdown())
+        const md = tweet.toMarkdown()
+        console.log(md)
         console.log()
     }
 
@@ -101,15 +101,15 @@ class Tweet {
         const rt = this.retweetedTweet
         if (rt) {
             return [
-                `<p>${this.user.toHTML()} <a href="${this.url}">retweeted</a>:</p>`,
+                `<p>${this.user.toHTML()} <a href="${this.url}">retweeted</a>:`,
                 `<blockquote>`,
                 rt.toHTML(),
                 `</blockquote>`
-            ].join("\n")
+            ].join("")
         }
 
         const lines = [
-            `<p>${this.user.toHTML()} <a href="${this.url}">wrote</a>:</p>`,
+            `<p>${this.user.toHTML()} <a href="${this.url}">wrote</a>:`,
         ]
         
         if (this.json.in_reply_to_status_id_str) {
@@ -119,37 +119,45 @@ class Tweet {
             const replyToTweetURL = `${replyToURL}/status/${statusID}`
             lines[0] = [
                 `<p>${this.user.toHTML()} <a href="${this.url}">replied</a>`
-                + ` to a <a href="${replyToTweetURL}">tweet</a> by <a href="${replyToURL}">${replyTo}</a>:</p>`,
-            ].join("\n")
+                + ` to a <a href="${replyToTweetURL}">tweet</a> by <a href="${replyToURL}">${replyTo}</a>:`,
+            ].join("")
         }
 
         lines.push(`<blockquote>`)
-        lines.push(`<p>${this.getTextAsHTML()}</p>`)
+        lines.push(`<p>${this.getTextAsHTML()}`)
 
         for (const media of this.json.extended_entities?.media || []) {
-            // TODO: Handle inline GIFs?
 
             const src = media.media_url_https
 
+            // TODO: Handle inline GIFs?
+            // TODO: Handle videos, it's not as simple as this:
             if (media.type != "photo") {
-                lines.push(`<p>${media.type}: <a href="${src}">${src}</a></p>`)
+                lines.push(`<p>${media.type}: <a href="${src}">${src}</a>`)
                 continue
             }
 
-            lines.push(`<p><a href="${src}"><img src="${src}"></a></p>`)
+            lines.push(`<p><a href="${src}"><img src="${src}"></a>`)
         }
 
         lines.push(`</blockquote>`)
 
         const qt = this.quotedTweet
         if (qt) {
-            lines.push(`<p>In reply to:`)
-            lines.push(`<blockquote>`)
+            // let qHTML = qt.toHTML()
+            // if (qHTML.startsWith("<p>")) {
+            //     qHTML = qHTML.substr(3)
+            // }
+            // lines.push(`<p>In reply to:\n<br>${qHTML}`)
+
+            // The above still seems to result in a new paragraph in markdown, what's up with that.
+            // May as well just:
+            lines.push("<p>In reply to:")
             lines.push(qt.toHTML())
-            lines.push(`</blockquote>`)
+
         }
 
-        const html = lines.join("\n")
+        const html = lines.join("")
         return html
     }
 
@@ -163,11 +171,14 @@ class Tweet {
         // remove quote-tweet URLs, they're redundant with what we display:
         const qt = this.quotedTweet
         if (qt) {
-            const qtURL = qt.url
-            const meta = this.json.entities?.urls.find(it => it.expanded_url == qtURL)
+            // Find the shortURL in this.text that links to this quoted tweet:
+            // Can differ by case. 
+            const qtURL = qt.url.toLowerCase()
+            const meta = this.json.entities?.urls.find(it => it.expanded_url.toLowerCase() == qtURL)
             if (!meta) {
-                console.warn("No URL for quote tweet:", this.url)
+                console.warn("No URL for quote tweet:", this.url, qt.url)
                 console.warn("entities:", this.json.entities)
+                console.warn("text:", text)
             } else {
                 const shortURL = meta.url
                 text = text.replaceAll(shortURL, "")
@@ -206,6 +217,7 @@ class Tweet {
             text = replaceMatch(text, match, link)
         }
 
+        // TODO: Doesn't seem to be working:
         while (true) {
             const match = MENTION_PAT.exec(text)
             if (!match) break
