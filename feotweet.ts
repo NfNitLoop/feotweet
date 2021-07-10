@@ -131,16 +131,22 @@ class Tweet {
 
         for (const media of this.json.extended_entities?.media || []) {
 
-            const src = media.media_url_https
+            // This is always a still image:
+            const imgSrc = media.media_url_https
+            let linkHref = imgSrc
+            let prefix = ""
 
-            // TODO: Handle inline GIFs?
-            // TODO: Handle videos, it's not as simple as this:
-            if (media.type != "photo") {
-                lines.push(`<p>${media.type}: <a href="${src}">${src}</a>`)
-                continue
+            if (media.video_info) {
+                const variants = media.video_info.variants
+                variants.sort((a, b) => b.bitrate - a.bitrate)
+                const variant = variants[0]
+                if (variant) {
+                    linkHref = variant.url
+                    prefix = "Video: "
+                }
             }
 
-            lines.push(`<p><a href="${src}"><img src="${src}"></a>`)
+            lines.push(`<p>${prefix}<a href="${linkHref}"><img src="${imgSrc}"></a>`)
         }
 
         lines.push(`</blockquote>`)

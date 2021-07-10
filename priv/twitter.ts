@@ -190,6 +190,18 @@ export interface Media {
      * See: https://developer.twitter.com/en/docs/twitter-api/premium/data-dictionary/object-model/entities#photo_format
      */
     media_url_https: string
+
+    video_info?: VideoInfo
+}
+
+export interface VideoInfo {
+    variants: VideoVariant[]
+}
+
+export interface VideoVariant {
+    bitrate: number,
+    content_type: string,
+    url: string
 }
 
 async function parseIntHeader(result: Response, header: string): Promise<number> {
