@@ -182,8 +182,12 @@ class Tweet {
         if (qt) {
             // Find the shortURL in this.text that links to this quoted tweet:
             // Can differ by case. 
+            // the expanded_url can also sometimes have query params like ?s=20, so 
+            // strip those.
             const qtURL = qt.url.toLowerCase()
-            const meta = this.json.entities?.urls.find(it => it.expanded_url.toLowerCase() == qtURL)
+            const meta = this.json.entities?.urls.find(it => { 
+                return it.expanded_url.toLowerCase().replace(URL_SEARCH_STRING, "") == qtURL
+            })
             if (!meta) {
                 console.warn("No URL for quote tweet:", this.url, qt.url)
                 console.warn("entities:", this.json.entities)
@@ -285,6 +289,7 @@ function replaceMatch(original: string, match: RegExpMatchArray, newValue: strin
 
 const MENTION_PAT = /(?<=\s|^)@([a-z0-9_]{2,15})/
 const URL_PAT = /(?<=\s|^)(https?:\/\/[^"\s]+)/
+const URL_SEARCH_STRING = /[?].*$/
 
 type TweetType = "simple"|"reply"|"retweet"|"quoteTweet"
 
