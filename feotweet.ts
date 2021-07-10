@@ -8,50 +8,47 @@ async function main(): Promise<number> {
     const options = getOptions()
     const config = await loadConfig(options.config)
 
-    const tClient = new twitter.Client(config.twitter)
-    const tweets = await tClient.getFeedPage()
+    // Find the last status saved in FeoBlog.
+    let lastTimestamp: number|undefined = undefined
+    const fbClient = new feoblog.Client({baseURL: config.feoblog.server})
+    const userID = feoblog.UserID.fromString(config.feoblog.write.userID)
+    for await(const entry of fbClient.getUserItems(userID)) {
+        if (entry.item_type != feoblog.protobuf.ItemType.POST) {
+            continue
+        }
+        lastTimestamp = entry.timestamp_ms_utc
+        break        
+    }
 
-    for (const tweetJSON of tweets) {
+    // Collect tweets we haven't saved yet:
+    const tClient = new twitter.Client(config.twitter)
+    const newTweets: Tweet[] = []
+    for await (const tweetJSON of tClient.homeTimeline()) {
         const tweet = new Tweet(tweetJSON)
         if (!tweet.isPublic) {
-            console.log("private:", tweet.url)
+            console.log("skipping private tweet:", tweet.url)
             continue
         }
 
-        console.log("tweet:")
-        const md = tweet.toMarkdown()
-        console.log(md)
-        console.log()
+        if (lastTimestamp && tweet.timestamp <= lastTimestamp) {
+            break 
+        }
+
+        newTweets.push(tweet)
+        if (newTweets.length >= options.maxTweets) { break }
     }
 
+    console.log("Found", newTweets.length, "new tweets")
 
-    // // Find the last status saved in FeoBlog.
-    // let lastTimestamp: number|undefined = undefined
-    // const fbClient = new feoblog.Client({baseURL: config.feoblog.server})
-    // const userID = feoblog.UserID.fromString(config.feoblog.write.userID)
-    // for await(const entry of fbClient.getUserItems(userID)) {
-    //     if (entry.item_type != feoblog.protobuf.ItemType.POST) {
-    //         continue
-    //     }
-    //     lastTimestamp = entry.timestamp_ms_utc
-    //     break        
-    // }
+    // Insert oldest first, so that we can resume if something goes wrong:
+    newTweets.sort(Tweet.sortByTimestamp)
 
-    // Collect statuses we haven't saved yet:
-    // TODO
-
-
-    // console.log("Found", newTweets.length, "new stattweetsuses")
-
-    // // Insert oldest first, so that we can resume if something goes wrong:
-    // newTweets.sort(StatusItem.sortByTimestamp)
-
-    // const privKey = await feoblog.PrivateKey.fromString(config.feoblog.write.password)
-    // for (const status of newTweets) {
-    //     const bytes = status.toItem().serialize()
-    //     const sig = privKey.sign(bytes)
-    //     await fbClient.putItem(userID, sig, bytes)
-    // }
+    const privKey = await feoblog.PrivateKey.fromString(config.feoblog.write.password)
+    for (const tweet of newTweets) {
+        const bytes = tweet.toItem().serialize()
+        const sig = privKey.sign(bytes)
+        await fbClient.putItem(userID, sig, bytes)
+    }
 
     return 0
 }
@@ -59,9 +56,15 @@ async function main(): Promise<number> {
 class Tweet {
 
     user: User
+    timestamp: number
 
     constructor(public json: twitter.TweetJSON) {
         this.user = new User(this.json.user)
+        this.timestamp = Date.parse(json.created_at).valueOf()
+    }
+
+    static sortByTimestamp(a: Tweet, b: Tweet) {
+        return a.timestamp - b.timestamp
     }
 
     get isPublic(): boolean {
@@ -238,6 +241,19 @@ class Tweet {
 
     toMarkdown(): string {
         return htmlToMarkdown(this.toHTML())
+    }
+
+    toItem(): feoblog.protobuf.Item {
+        const item = new feoblog.protobuf.Item({
+            timestamp_ms_utc: this.timestamp,
+            // I didn't see TZ offsets in the twitter JSON data, so UTC for everyone.
+        })
+
+        item.post = new feoblog.protobuf.Post({
+            body: this.toMarkdown()
+        })
+
+        return item
     }
 
 }

@@ -1,5 +1,5 @@
 // deno-lint-ignore-file
-import { denoTwitter } from "./deps.ts"
+import { delay, denoTwitter } from "./deps.ts"
 import { Twitter as TwitterKeys } from "./config.ts"
 
 // TODO: deps, if this works:
@@ -18,16 +18,38 @@ export class Client {
         this.#keys = keys
     }
 
-    // TODO: Paginated version of this.
-    async getFeedPage(max_id: string|undefined = undefined): Promise<TweetJSON[]> {
+    async * homeTimeline(): AsyncGenerator<TweetJSON> {
+        let maxID: string|undefined = undefined
+        while (true) {
+            const tweets: TweetJSON[] = await this.getFeedPage(maxID)
+            if (tweets.length == 0) { return }
+            for (const tweet of tweets) {
+                yield tweet
+            }
+
+            maxID = tweets[tweets.length - 1].id_str
+        }
+    }
+
+    private async getFeedPage(maxID: string|undefined = undefined): Promise<TweetJSON[]> {
         let url = new URL(`${this.baseURL}/1.1/statuses/home_timeline.json`)
 
         // Get longer tweet texts:
         // See: https://developer.twitter.com/en/docs/twitter-ads-api/creatives/api-reference/tweets
         url.searchParams.set("tweet_mode", "extended")
+        if (maxID) {
+            url.searchParams.set("max_id", maxID)
+        }
+        // OK, I'm limited on the number of requests I can make. 
+        // So why would I ever want fewer than the max I can get in a request? 🤦‍♂️
+        url.searchParams.set("count", "200")
 
-        // TODO: max_id
+        const result = await this.get(url)
+        const json = await result.json()
+        return json as TweetJSON[]
+    }
 
+    private async get(url: URL): Promise<Response> {
         const queryParameters: Record<string,string> = {}
         for (const [k,v] of url.searchParams) { queryParameters[k] = v; }
 
@@ -41,24 +63,47 @@ export class Client {
             pathname: url.pathname,
             queryParameters
         })
+    
+        while (true) {
+            const result = await fetch(url, {
+                headers: {
+                    "Authorization": oauth,
+                },
+            })
 
-        const result = await fetch(url, {
-            headers: {
-                "Authorization": oauth,
-            },
-        })
-
-        if (!result.ok) { 
-            throw { 
-                error: "Non-OK response from Twitter API", 
-                result,
-                body: await result.text()
+            // Wait for rate limit:
+            if (result.status == 429) {
+                // ex:
+                // "x-rate-limit-limit": "15",
+                // "x-rate-limit-remaining": "0",
+                // "x-rate-limit-reset": "1625886502"
+                const remaining = await parseIntHeader(result, "x-rate-limit-remaining")
+                if (remaining > 0) {
+                    throw {
+                        error: `Got a rate limit warning, but we have ${remaining} calls remaining`,
+                        result,
+                        body: await result.text()
+                    }
+                }
+                const limitResetMS = await parseIntHeader(result, "x-rate-limit-reset") * 1000
+                const now = new Date().valueOf()
+                const waitMs = (limitResetMS - now) + 5000 // for good measure (& clock drift)
+                console.log("Waiting", waitMs/1000, "seconds for rate limit to pass")
+                await delay(waitMs)
+                continue
             }
-        }
 
-        const json = await result.json()
-        return json as TweetJSON[]
-    }
+            if (!result.ok) { 
+                throw { 
+                    error: "Non-OK response from Twitter API", 
+                    result,
+                    body: await result.text()
+                }
+            }
+
+            return result
+        } // while
+    } // get()
 }
 
 /**
@@ -145,4 +190,25 @@ export interface Media {
      * See: https://developer.twitter.com/en/docs/twitter-api/premium/data-dictionary/object-model/entities#photo_format
      */
     media_url_https: string
+}
+
+async function parseIntHeader(result: Response, header: string): Promise<number> {
+    let str = result.headers.get(header)
+    if (!str) {
+        throw {
+            error: `Expected HTTP header ${header}`,
+            result,
+            body: await result.body
+        }
+    }
+
+    try { return parseInt(str) }
+    catch (error) {
+        throw {
+            context: `Trying to parse header: ${header}`,
+            error,
+            result,
+            body: await result.body
+        }
+    }
 }

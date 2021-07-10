@@ -49,12 +49,12 @@ Deno.test("links with spaces", () => {
 // Until this is fixed, can't use referenced shortcuts.
 Deno.test("turndown referenced shortcuts", () => {
     const input = `<a href="https://www.google.com/">Link</a> <a href="https://www.wikipedia.org/">Link</a>`
-    const expectedGood = [
-        "[Link] [Link][1]",
-        "",
-        "[Link]: https://www.google.com/",
-        "[1]: https://www.wikipedia.org/",
-    ].join("\n")
+    // const expectedGood = [
+    //     "[Link] [Link][1]",
+    //     "",
+    //     "[Link]: https://www.google.com/",
+    //     "[1]: https://www.wikipedia.org/",
+    // ].join("\n")
 
     // But what we actually get:
     const expectedBad = [
