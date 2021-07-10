@@ -287,8 +287,8 @@ function replaceMatch(original: string, match: RegExpMatchArray, newValue: strin
     )
 }
 
-const MENTION_PAT = /(?<=\s|^)@([a-z0-9_]{2,15})/
-const URL_PAT = /(?<=\s|^)(https?:\/\/[^"\s]+)/
+const MENTION_PAT = /(?<=\s|^)@([a-z0-9_]{2,15})/i
+const URL_PAT = /(?<=\s|^)(https?:\/\/[^"\s]+)/i
 const URL_SEARCH_STRING = /[?].*$/
 
 type TweetType = "simple"|"reply"|"retweet"|"quoteTweet"
