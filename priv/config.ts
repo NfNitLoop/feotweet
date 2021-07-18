@@ -1,30 +1,4 @@
-import {args, feoblog, toml} from "./deps.ts"
-
-const CLI_OPTIONS = (
-    args.args
-    .describe("A tool to sync a twitter feed to FeoBlog")
-    .with(args.PartialOption("config", {
-        type: args.Text,
-        describe: "Config file to use",
-        default: "./feotweet.toml"
-    }))
-    .with(args.PartialOption("maxTweets", {
-        default: 100,
-        type: args.Integer,
-        describe: "The max number of tweets to read from Twitter"
-    }))
-)
-
-export function getOptions() {
-    const result = CLI_OPTIONS.parse(Deno.args)
-    if (result.error) {
-        throw {
-            context: "Error parsing CLI options",
-            error: result.error,
-        }
-    }
-    return result.value
-}
+import {feoblog, toml} from "./deps.ts"
 
 export interface Config {
     twitter: Twitter

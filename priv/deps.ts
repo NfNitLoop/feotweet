@@ -4,7 +4,8 @@ export * as toml from "https://deno.land/std@0.100.0/encoding/toml.ts"
 export { delay } from "https://deno.land/std@0.100.0/async/delay.ts"
 
 // third-party:
-export * as args from "https://deno.land/x/args@2.1.1/index.ts"
+export * as cliffy from "https://deno.land/x/cliffy@v0.19.3/command/mod.ts"
+
 // TODO: Use a deno.land/x/ version once a release is made:
 export * as denoDOM from "https://github.com/b-fuze/deno-dom/raw/188d7240e5371caf1b4add8bb7183933d142337e/deno-dom-wasm.ts"
 export * as denoTwitter from "https://deno.land/x/deno_twitter_api@v1.1.0/mod.ts"

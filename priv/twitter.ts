@@ -49,6 +49,26 @@ export class Client {
         return json as TweetJSON[]
     }
 
+    /** Get a single tweet */
+    public async getStatus(id: string): Promise<TweetJSON> {
+        let url = new URL(`${this.baseURL}/1.1/statuses/show.json`)
+        url.searchParams.set("id", id)
+        url.searchParams.set("include_entities", "true")
+
+        // This is not documented at
+        // https://developer.twitter.com/en/docs/twitter-api/v1/tweets/post-and-engage/api-reference/get-statuses-show-id
+        // But appears to work.
+        url.searchParams.set("tweet_mode", "extended")
+
+        const result = await this.get(url)
+        const json = await result.json() as TweetJSON
+        if (json.full_text === undefined) {
+            throw "tweet_mode=extended seems to have stopped working for the status endpoint"
+        }
+
+        return json
+    }
+
     private async get(url: URL): Promise<Response> {
         const queryParameters: Record<string,string> = {}
         for (const [k,v] of url.searchParams) { queryParameters[k] = v; }

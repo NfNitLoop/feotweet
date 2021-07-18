@@ -1,11 +1,11 @@
-import { getOptions, loadConfig} from "./priv/config.ts"
+import { loadConfig} from "./priv/config.ts"
 import * as twitter from "./priv/twitter.ts"
 
-import { feoblog } from "./priv/deps.ts"
+import { cliffy, feoblog } from "./priv/deps.ts"
 import { htmlToMarkdown } from "./priv/markdown.ts"
 
-async function main(): Promise<number> {
-    const options = getOptions()
+
+async function main(options: MainOptions): Promise<void> {
     const config = await loadConfig(options.config)
 
     // Find the last status saved in FeoBlog.
@@ -49,9 +49,72 @@ async function main(): Promise<number> {
         const sig = privKey.sign(bytes)
         await fbClient.putItem(userID, sig, bytes)
     }
-
-    return 0
 }
+
+const STATUS_URL_PAT = /^https:\/\/twitter.com\/[^/]+\/status\/(\d+)$/i
+// https://twitter.com/jwz/status/1413750203056721927
+
+// deno-lint-ignore require-await
+async function example(options: GlobalOptions, url: string) {
+    const config = await loadConfig(options.config)
+
+    const match = STATUS_URL_PAT.exec(url)
+    if (!match) {
+        throw {
+            error: "URL does not appear to be a valid status URL",
+            url,
+            expected: STATUS_URL_PAT,
+        }
+    }
+    const id = match[1]
+
+    const tClient = new twitter.Client(config.twitter)
+    const json = await tClient.getStatus(id)
+
+    console.log("This JSON:")
+    console.log(json)
+    console.log()
+
+    const tweet = new Tweet(json)
+
+
+    // console.log doesn't want to show deep hierarchies, so show
+    // them manually:
+    const media = json.extended_entities?.media
+    if (media) {
+        console.log("Containing these extended_entities.media:")
+        showMedia(media)
+        console.log()
+    }
+
+    const media2 = (tweet.quotedTweet || tweet.retweetedTweet)?.json.extended_entities?.media
+    if (media2) {
+        console.log("Referincing a tweet with these extended_entities.media:")
+        showMedia(media2)
+        console.log()
+    }
+
+
+    console.log("Would produce this Markdown:")
+    console.log()
+    console.log(tweet.toMarkdown())
+
+
+    
+}
+
+function showMedia(media: twitter.Media[]) {
+    for (const item of media) {
+        console.log("media type:", item.type)
+        console.log("media_url_https:", item.media_url_https)
+        const variants = item.video_info?.variants
+        if (variants) {
+            console.log("variants:", variants)
+        }
+
+    }
+}
+
 
 class Tweet {
 
@@ -316,11 +379,38 @@ class User {
 }
 
 
+
+const CLI_OPTIONS = (
+    new cliffy.Command<void>()
+    .name("feotweet")
+    .description("A tool to sync a twitter feed to FeoBlog")
+    .globalOption<{config: string}>("--config", "Config file to use", {default: "./feotweet.toml"})
+    .option<{maxTweets: number}>("--maxTweets", "Max # of tweets to read from Twitter", {default: 100})
+    .action(main)
+)
+
+CLI_OPTIONS.command("example")
+    .description("Convert one tweet from its URL")
+    .hidden()
+    .arguments<[url: string]>("<url:string>")
+    .action(example)
+
+interface GlobalOptions {
+    config: string
+}
+
+interface MainOptions extends GlobalOptions {
+    maxTweets: number
+}
+
+
+
+
 // ---------------------
 try {
-    Deno.exit(await main() || 0)
+    await CLI_OPTIONS.parse(Deno.args)
 } catch (error) {
-    console.error(error)
+    console.error("ERROR:", error)
     Deno.exit(1)
 }
 
