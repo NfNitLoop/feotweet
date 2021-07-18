@@ -219,7 +219,7 @@ export interface VideoInfo {
 }
 
 export interface VideoVariant {
-    bitrate: number,
+    bitrate?: number,
     content_type: string,
     url: string
 }

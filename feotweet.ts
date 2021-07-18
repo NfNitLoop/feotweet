@@ -201,7 +201,7 @@ class Tweet {
 
             if (media.video_info) {
                 const variants = media.video_info.variants
-                variants.sort((a, b) => b.bitrate - a.bitrate)
+                variants.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
                 const variant = variants[0]
                 if (variant) {
                     linkHref = variant.url
