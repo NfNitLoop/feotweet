@@ -1,22 +1,29 @@
 import { Config, loadConfig, UserTimeline} from "./priv/config.ts"
 import * as twitter from "./priv/twitter.ts"
 
-import { bytes, cliffy, feoblog, hash, io, ioUtil, path, toml } from "./priv/deps.ts"
+import { bytes, cliffy, feoblog, hash, io, ioUtil, log, path, toml } from "./priv/deps.ts"
 import { htmlToMarkdown } from "./priv/markdown.ts"
 
-// TODO: Find a good logger w/ configurable loglevels. I wrote my own in rss2feoblog, reuse that?
+
 
 async function main(options: MainOptions): Promise<void> {
+    logger.debug(() => `Log level: ${logger.level}`)
+    logger.debug(() => `Loading config`)
+
     const config = await loadConfig(options.config)
 
     await syncHomeTimeline(options, config)
 
     await syncUserTimelines(options, config)
+
+    logger.debug("Done.")
 }
 
 async function syncHomeTimeline(options: MainOptions, config: Config): Promise<void> {
+    logger.info("Syncing home timeline")
     if (!config.twitter.homeTimeline) {
-        return // nothing to do
+        logger.info("No home timeline configured, nothing to do.")
+        return
     }
 
     // Find the last status saved in FeoBlog.
@@ -30,7 +37,7 @@ async function syncHomeTimeline(options: MainOptions, config: Config): Promise<v
     for await (const tweetJSON of tClient.homeTimeline()) {
         const tweet = new Tweet(tweetJSON)
         if (!tweet.isPublic) {
-            console.log("skipping private tweet:", tweet.url)
+            logger.info(() => `skipping private tweet: ${tweet.url}`)
             continue
         }
 
@@ -42,7 +49,7 @@ async function syncHomeTimeline(options: MainOptions, config: Config): Promise<v
         if (newTweets.length >= options.maxTweets) { break }
     }
 
-    console.log("Found", newTweets.length, "new tweets")
+    logger.info(() => `Found ${newTweets.length} new tweets`)
 
     // Insert oldest first, so that we can resume if something goes wrong:
     newTweets.sort(Tweet.sortByTimestamp)
@@ -78,6 +85,7 @@ async function syncUserTimelines(options: MainOptions, config: Config): Promise<
 }
 
 async function syncUserTimeline(timeline: UserTimeline, _options: MainOptions, config: Config): Promise<void> {
+    logger.info(() => `Syncing timeline for @${timeline.twitterScreenName}`)
     const fbClient = new feoblog.Client({baseURL: config.feoblog.server})
     const userID = feoblog.UserID.fromString(timeline.userID)
     
@@ -86,7 +94,10 @@ async function syncUserTimeline(timeline: UserTimeline, _options: MainOptions, c
     // See: https://developer.twitter.com/en/docs/twitter-api/v1/tweets/timelines/api-reference/get-statuses-user_timeline
     // Max number supported by the endpoint. Always get the max, because once they fall outside of that range, 
     // you can never fetch them again.
-    const maxTweets = 10 // 3200
+    // The max is documented as 3200, so we shouldn't actually reach this number:
+    const maxTweets = 5000 
+
+    const statusLogger = new ThrottledLogger(logger)
 
     const tClient = new twitter.Client(config.twitter)
     const newTweets: Tweet[] = []
@@ -103,6 +114,7 @@ async function syncUserTimeline(timeline: UserTimeline, _options: MainOptions, c
         }
 
         newTweets.push(tweet)
+        statusLogger.info(() => `Loaded ${newTweets.length} tweets.`)
         if (newTweets.length >= maxTweets) { break }
     }
 
@@ -114,28 +126,67 @@ async function syncUserTimeline(timeline: UserTimeline, _options: MainOptions, c
     // 1. Download multiple attachments at once. (in Item.toHTML)
     // 2. Download multiple tweets' attachments at once?
     //    ... though this one may conflict w/ tweet backreferences that I'd like to implement later.
-    for (const tweet of newTweets) {
+    for (const [index, tweet] of newTweets.entries()) {
         const collector = timeline.copyAttachments ? new Attachments() : new NoOpAttachmentColletor()
         await collector.collect(async (attachments) => {
 
-            const itemBytes = (await tweet.toItem({attachments})).serialize()
+            statusLogger.info(() => `Copying tweet ${index} of ${newTweets.length}`)
+            const itemBytes = await errorContext(`While copying tweet: ${tweet.url}`, async () => {
+                return (await tweet.toItem({attachments})).serialize()
+            })
             const sig = privKey.sign(itemBytes)
-            // console.log("Copying tweet", tweet.url)
+            logger.debug(() => `Copying tweet: ${tweet.url}`)
             await fbClient.putItem(userID, sig, itemBytes)
-            // console.log("Done")
 
             for (const attachment of attachments.attachments) {
-                // console.log("PUT-ting file:", attachment.name, attachment.size)
+                logger.debug(() => `PUT-ting file: ${attachment.name} size: ${attachment.size}`)
                 await attachment.withReader(async (reader) => {
                     const stream = io.readableStreamFromReader(reader)
-                    // const stream = await ioUtil.readAll(reader)
-                    // console.log("About to putAttachment")
-                    // await delay(3000)
                     await fbClient.putAttachment(userID, sig, attachment.name, attachment.size, stream)
                 })
             }
 
         })
+    }
+}
+
+/** Add some error context when something fails:  */
+async function errorContext<T>(message: string, callback: () => Promise<T>): Promise<T> {
+    try {
+        return await callback()
+    } catch (cause) {
+        throw new Exception(message, cause)
+    }
+}
+
+class Exception extends Error {
+    constructor(readonly message: string, readonly cause: unknown) {
+        // It looks like console.log doesn't use Error.toString(), instead
+        // it prints error.message and the stack trace. SO cram context into the message:
+        if (cause) {
+            message = `message\n${cause}`
+        }
+        super(message)
+    }
+}
+
+class ThrottledLogger {
+    delayMs = 5000
+
+    private lastLogMs = 0;
+
+    constructor(private logger: log.Logger) {
+        this.lastLogMs = this.now
+    }
+
+    private get now() { return new Date().valueOf() }
+    private get elapsed() { return this.now - this.lastLogMs }
+    private get shouldLog() { return this.elapsed > this.delayMs }
+
+    info(message: unknown) {
+        if (!this.shouldLog) { return }
+        this.logger.info(message)
+        this.lastLogMs = this.now
     }
 }
 
@@ -236,7 +287,7 @@ class Tweet {
             return [
                 `<p>${this.user.toHTML()} <a href="${this.url}">retweeted</a>:`,
                 `<blockquote>`,
-                await rt.toHTML(options),
+                await rt.toHTML({...options, attachments: options.attachments.forRetweet()}),
                 `</blockquote>`
             ].join("")
         }
@@ -262,7 +313,7 @@ class Tweet {
         for (const media of this.json.extended_entities?.media || []) {
 
             // This is always a still image:
-            const imgSrc = await options.attachments.addURL(media.media_url_https)
+            const imgSrc = await options.attachments.tryAddURL(media.media_url_https, this.url)
 
             // We might link this to a movie if it exists:
             let linkHref = imgSrc
@@ -273,7 +324,7 @@ class Tweet {
                 variants.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
                 const variant = variants[0]
                 if (variant) {
-                    linkHref = await options.attachments.addURL(variant.url)
+                    linkHref = await options.attachments.tryAddURL(variant.url, this.url)
                     prefix = "Video: "
                 }
             }
@@ -294,7 +345,7 @@ class Tweet {
             // The above still seems to result in a new paragraph in markdown, what's up with that.
             // May as well just:
             lines.push("<p>with quote tweet:")
-            lines.push(await qt.toHTML(options))
+            lines.push(await qt.toHTML({...options, attachments: options.attachments.forQuoteTweet()}))
 
         }
 
@@ -321,9 +372,9 @@ class Tweet {
                 return it.expanded_url.toLowerCase().replace(URL_SEARCH_STRING, "") == qtURL
             })
             if (!meta) {
-                console.warn("No URL for quote tweet:", this.url, qt.url)
-                console.warn("entities:", this.json.entities)
-                console.warn("text:", text)
+                logger.warning(() => `No URL for quote tweet: ${this.url} ${qt.url}`)
+                logger.warning(() => `entities: ${JSON.stringify(this.json.entities, null, 4)}`)
+                logger.warning(() => `text: ${text}`)
             } else {
                 const shortURL = meta.url
                 text = text.replaceAll(shortURL, "")
@@ -463,26 +514,60 @@ class User {
     }
 }
 
-// TODO: rename. AttachmentContainer?
-// TODO: Really this whole API seems ... over-engineered. 
 interface AttachmentCollector {
     readonly attachments: readonly Attachment[]
 
     /** Add a URL to the collected attachments.
      * @returns a new URL to use instead to access the attachment.
      */
-    addURL(url: string): Promise<string>
-}
+    tryAddURL(fileURL: string, tweetURL: string): Promise<string>
 
-interface AttachmentCollectorManager {
     /** Collects attachments.  Automatically cleans up attachments at the end of its call block. */
     collect<T>(callback: (attachments: AttachmentCollector) => Promise<T>): Promise<T>
+
+    /**
+     * Frees temp files created by the AttachmentCollector.
+     * 
+     * Not necessary if you're using collect()
+     */
+    drop(): Promise<void>
+
+    /** Return an attachment collector for collecting attachments of a retweet */
+    forRetweet(): AttachmentCollector
+
+    /** Return an attachment collector for collecting attachments of a quote tweet */
+    forQuoteTweet(): AttachmentCollector
+}
+
+
+class NoOpAttachmentColletor implements AttachmentCollector {
+
+    readonly attachments: Attachment[] = []
+
+    async collect<T>(callback: (attachments: AttachmentCollector) => Promise<T>): Promise<T> {
+        try {
+            return await callback(this)
+        } finally {
+            await this.drop()
+        }
+    }
+
+    // deno-lint-ignore require-await
+    async tryAddURL(url: string): Promise<string> {
+        return url
+    }
+
+    async drop(): Promise<void> {}
+
+    forQuoteTweet() { return this }
+    forRetweet() { return this }
 }
 
 /** Collects attachments that we'll post with a particular Item. */
-class Attachments implements AttachmentCollectorManager {
+class Attachments implements AttachmentCollector {
 
     private _attachments: Attachment[] = []
+    private static noOp = new NoOpAttachmentColletor()
 
     get attachments(): readonly Attachment[] { return this._attachments }
 
@@ -516,40 +601,43 @@ class Attachments implements AttachmentCollectorManager {
         this._attachments.push(attachment)
     }
 
-    async addURL(url: string): Promise<string> {
+    private async addURL(url: string): Promise<string> {
         const a = await Attachment.fromURL(new URL(url))
         await this.add(a)
         return a.markdownPath
     }
 
-    private async drop() {
+    /** Try to download the attachment, but fall back to embedding if we can't. */
+    async tryAddURL(fileURL: string, tweetURL: string) {
+        try {
+            return await this.addURL(fileURL)
+        } catch (error) {
+            if (error instanceof FetchError && error.response.status == 403) {
+                // This can happen when Twitter takes down media that's no longer available.
+                logger.warning(() => `${fileURL} for ${tweetURL} no longer available. Skipping.`)
+                // Still link to the media, even though it's not available.
+                return fileURL
+            }
+
+            throw error
+        }
+    }
+
+    // I could see having this configurable in the future but for now, things get REALLY big if
+    // you include all the images/movies that someone can retweet. Plus there are questions of
+    // copyright.  Instead, we don't collect them and just reference them.
+    forQuoteTweet() { return Attachments.noOp }
+    forRetweet() { return Attachments.noOp }
+
+    async drop() {
         for (const a of this._attachments) {
             try { await a.drop() }
-            catch { console.error(`Error dropping ${a}`)}
+            catch { logger.error(`Error dropping ${a}`)}
         }
         this._attachments = []
     }
 }
 
-class NoOpAttachmentColletor implements AttachmentCollectorManager {
-
-    readonly attachments: Attachment[] = []
-
-    async collect<T>(callback: (attachments: AttachmentCollector) => Promise<T>): Promise<T> {
-        try {
-            return await callback(this)
-        } finally {
-            await this.drop()
-        }
-    }
-
-    // deno-lint-ignore require-await
-    async addURL(url: string): Promise<string> {
-        return url
-    }
-
-    async drop(): Promise<void> {}
-}
 
 /**
  * A single attachment we'll add to an Item 
@@ -587,10 +675,10 @@ class Attachment {
 
         const response = await fetch(url)
         if (!response.ok) {
-            throw {error: "Response error", response}
+            throw new FetchError("Non-OK response", response)
         }
         if (!response.body) {
-            throw `Null response body for ${url}`
+            throw new FetchError("Null response body", response)
         }
 
         const fileName = path.basename(url.pathname)
@@ -633,6 +721,12 @@ class Attachment {
         
 }
 
+class FetchError extends Error {
+    constructor(message: string, readonly response: Response) {
+        super(message)
+    }
+}
+
 /** 
  * If we pass a raw File object, some things (*cough*
  * io.readableStreamFromReader()) will inspect its type and call its .close()
@@ -645,11 +739,49 @@ class ReaderWrapper implements Deno.Reader {
     }
 }
 
+
+
+
+type ValueHandler<In,Out> = (value: In) => Out
+// std log's loglevels are non-contiguous. Here we just order them for ourselves:
+const logLevels = [
+    log.LogLevels.DEBUG,
+    log.LogLevels.INFO,
+    log.LogLevels.WARNING,
+    log.LogLevels.ERROR,
+    log.LogLevels.CRITICAL
+]
+
+// a cliffy option handler to increment the log level
+function incLogLevel(incAmount: number): ValueHandler<boolean,void> {
+    const handler = (_value: boolean) => {
+        const levelNum = logLevels.findIndex(it => it === logger.level)
+        if (levelNum < 0) {
+            throw new Error(`Initial logLevel was not found: ${logger.levelName}`)
+        }
+        const newLevel = logLevels[levelNum + incAmount]
+        if (newLevel) {
+            logger.level = newLevel
+        }
+    }
+
+    return handler
+}
+
+
 const CLI_OPTIONS = (
     new cliffy.Command<void>()
     .name("feotweet")
     .description("A tool to sync a twitter feed to FeoBlog")
     .globalOption<{config: string}>("--config", "Config file to use", {default: "./feotweet.toml"})
+    .globalOption<void>("-v, --verbose", "Increase log verbosity", {
+        collect: true,
+        value: incLogLevel(-1)
+    })
+    .globalOption<void>("-q, --quiet", "Decrease log verbosity", {
+        collect: true,
+        value: incLogLevel(1)
+    })
     .option<{maxTweets: number}>("--maxTweets", "Max # of tweets to read from Twitter", {default: 100})
     .action(main)
 )
@@ -669,11 +801,29 @@ interface MainOptions extends GlobalOptions {
 }
 
 
+await log.setup({
+    handlers: {
+        // Set the handler to the lowest level, so it'll
+        // log everything we throw at it. We'll limit our
+        // logs via our logger.level.
+        // (Otherwise, log defaults to "INFO")
+        default: new log.handlers.ConsoleHandler("DEBUG")
+    },
+    loggers: {
+        default: {
+            level: "INFO",
+            handlers: ["default"]
+        }
+    }
+})
+
+const logger = log.getLogger()
+
 if (import.meta.main) {
     try {
         await CLI_OPTIONS.parse(Deno.args)
     } catch (error) {
-        console.error("ERROR:", error)
+        logger.error(error)
         Deno.exit(1)
     }    
 }

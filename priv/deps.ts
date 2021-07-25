@@ -1,9 +1,10 @@
 // std:
-export * as bytes from "https://deno.land/std@0.100.0/bytes/mod.ts";
-export * as io from "https://deno.land/std@0.100.0/io/mod.ts";
-export * as ioUtil from "https://deno.land/std@0.100.0/io/util.ts";
-export * as hash from "https://deno.land/std@0.100.0/hash/mod.ts";
-export * as path from "https://deno.land/std@0.100.0/path/mod.ts";
+export * as bytes from "https://deno.land/std@0.100.0/bytes/mod.ts"
+export * as io from "https://deno.land/std@0.100.0/io/mod.ts"
+export * as ioUtil from "https://deno.land/std@0.100.0/io/util.ts"
+export * as log from "https://deno.land/std@0.100.0/log/mod.ts"
+export * as hash from "https://deno.land/std@0.100.0/hash/mod.ts"
+export * as path from "https://deno.land/std@0.100.0/path/mod.ts"
 export * as toml from "https://deno.land/std@0.100.0/encoding/toml.ts"
 export { delay } from "https://deno.land/std@0.100.0/async/delay.ts"
 
