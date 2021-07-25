@@ -14,8 +14,29 @@ accessTokenSecret = ""
 [feoblog]
 server = "http://127.0.0.1:8080"
 
-[feoblog.write]
-# will write tweets into FeoBlog on this blog:
+[twitter.homeTimeline]
+# This syncs the current Twitter user's home timeline (i.e.: posts from those they follow)
+# from Twitter into this feoblog user's blog:
 userID = ""
 password = ""
 
+# TODO
+# Don't bother syncing tweets/retweets/quote-tweets from these twitter users:
+skipUsers = [
+    "chattyMcChatterson",
+]
+
+[[twitter.userTimelines]]
+twitterScreenName = "twitterName"
+
+# Sync all tweets from the above timeline to a particular FeoBlog.
+# Note: We use the timestamps of posts to know where to pick up sync, so
+# don't re-use the userID from homeTimeline, or between 
+userID = ""
+password = ""
+
+# Should we copy attachments into FeoBlog? (Default: false)
+copyAttachments = true
+
+skipReplies = true # default false
+skipRetweets = true # default false

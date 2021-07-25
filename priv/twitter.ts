@@ -24,12 +24,57 @@ export class Client {
             const tweets: TweetJSON[] = await this.getFeedPage(maxID)
             if (tweets.length == 0) { return }
             for (const tweet of tweets) {
+                if (maxID === tweet.id_str) { continue }
                 yield tweet
             }
 
             maxID = tweets[tweets.length - 1].id_str
         }
     }
+
+    /** Get tweets from a single user's timeline (i.e.: just tweets by that user) */
+    async * userTimeline(screenName: string, timelineOptions: UserTimelineOptions): AsyncGenerator<TweetJSON> {
+        let maxID: string|undefined = undefined
+        while (true) {
+            const tweets: TweetJSON[] = await this.getUserTimeline(screenName, maxID, timelineOptions)
+            if (tweets.length == 0) { return }
+            for (const tweet of tweets) {
+                if (maxID === tweet.id_str) { continue }
+                yield tweet
+            }
+
+            maxID = tweets[tweets.length - 1].id_str
+        }
+    }
+
+    private async getUserTimeline(screenName: string, maxID: string|undefined, options: UserTimelineOptions): Promise<TweetJSON[]> {
+        let url = new URL(`${this.baseURL}/1.1/statuses/user_timeline.json`)
+
+        const params = url.searchParams
+        // Get longer tweet texts:
+        // See: https://developer.twitter.com/en/docs/twitter-ads-api/creatives/api-reference/tweets
+        params.set("tweet_mode", "extended")
+        if (maxID) {
+            params.set("max_id", maxID)
+        }
+        // OK, I'm limited on the number of requests I can make. 
+        // So why would I ever want fewer than the max I can get in a request? 🤦‍♂️
+        params.set("count", "200")
+
+        params.set("screen_name", screenName)
+        if (options.skipReplies) {
+            // I assume this default to "false"? Docs are ambiguous.
+            params.set("exclude_replies", "true")
+        }
+        if (options.skipRetweets) {
+            params.set("include_rts", "false")
+        }
+
+        const result = await this.get(url)
+        const json = await result.json()
+        return json as TweetJSON[]
+    }
+        
 
     private async getFeedPage(maxID: string|undefined = undefined): Promise<TweetJSON[]> {
         let url = new URL(`${this.baseURL}/1.1/statuses/home_timeline.json`)
@@ -124,6 +169,11 @@ export class Client {
             return result
         } // while
     } // get()
+}
+
+export interface UserTimelineOptions {
+    skipReplies?: boolean
+    skipRetweets?: boolean
 }
 
 /**
