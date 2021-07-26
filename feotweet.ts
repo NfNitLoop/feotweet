@@ -363,20 +363,13 @@ class Tweet {
         // remove quote-tweet URLs, they're redundant with what we display:
         const qt = this.quotedTweet
         if (qt) {
-            // Find the shortURL in this.text that links to this quoted tweet:
-            // Can differ by case. 
-            // the expanded_url can also sometimes have query params like ?s=20, so 
-            // strip those.
-            const qtURL = qt.url.toLowerCase()
-            const meta = this.json.entities?.urls.find(it => { 
-                return it.expanded_url.toLowerCase().replace(URL_SEARCH_STRING, "") == qtURL
-            })
-            if (!meta) {
+            const shortURL = this.findQTShortURL()
+            if (!shortURL) {
                 logger.warning(() => `No URL for quote tweet: ${this.url} ${qt.url}`)
                 logger.warning(() => `entities: ${JSON.stringify(this.json.entities, null, 4)}`)
                 logger.warning(() => `text: ${text}`)
+                logger.warning(() => "Continuing without deleting the URL.")
             } else {
-                const shortURL = meta.url
                 text = text.replaceAll(shortURL, "")
             }
         }
@@ -392,6 +385,39 @@ class Tweet {
         
         return text
     }
+
+    // Quoted tweets contain a (shortened) URL of the quoted tweet at the end of their text.
+    // This lets us find it, so we can remove it.
+    private findQTShortURL(): string|undefined {
+        const qt = this.quotedTweet
+        if (!qt) return undefined;
+
+        // You can't just use simple string matches.
+        // 1. Sometimes the entity URL contains a ?get=parameter
+        // 2. Sometimes the user has changed their display name, so the URL
+        //    inside the tweet contains an old name which no longer matches
+        //    what's returned by the API.
+        // Instead, rely on the globally unique status ID to find the URL.
+
+        const statusID = this.statusIDFromURL(qt.url)
+        if (!statusID) {
+            // This would seem to indicate Twitter has broken their API, so fail hard:
+            throw new Error(`Tweet ${this.url} has quote tweet URL (${qt.url}) which is not a status URL!?`)
+        }
+
+        const meta = this.json.entities?.urls.find(it => this.statusIDFromURL(it.expanded_url) === statusID)
+        if (meta) return meta.url
+        
+        return undefined
+    }
+
+    private statusIDFromURL(url: string): string|undefined {
+        const match = Tweet.STATUS_PAT.exec(url)
+        if (!match) return undefined
+        return match[1]
+    }
+
+    private static STATUS_PAT = /\/status\/(\d+)/i
 
     getTextAsHTML(): string {
         let text = this.getText()
