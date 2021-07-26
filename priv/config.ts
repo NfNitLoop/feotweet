@@ -29,12 +29,17 @@ export interface Twitter {
     userTimelines?: UserTimeline[]
 }
 
-export interface HomeTimeline {
+// login creds for FeoBlog.
+interface FBLogin {
     userID: string
     password: string
 }
 
-export interface UserTimeline extends HomeTimeline {
+export interface HomeTimeline extends FBLogin {
+    skipUsers: string[]
+}
+
+export interface UserTimeline extends FBLogin {
     twitterScreenName: string
 
     copyAttachments: boolean
@@ -77,6 +82,7 @@ export async function loadConfig(fileName: string): Promise<Config> {
         config.twitter.homeTimeline = {
             userID: checkUserID(requireUserID("twitter.homeTimeline.userID", ht.userID)),
             password: await requirePassword("twitter.homeTimeline.password", ht.userID, ht.password),
+            skipUsers: await optionalArray("twitter.homeTimeline.skipUsers", ht.skipUsers, requireScreenName),
         }
     }
 
@@ -132,7 +138,9 @@ async function requirePassword(name: string, userValue: unknown, passwordValue: 
     }
 }
 
-async function requireArray<T>(name: string, jsonValue: unknown, callback: (name: string, value: unknown) => Promise<T>): Promise<T[]> {
+type ValueConverter<T> = (name: string, value: unknown) => Promise<T>
+
+async function requireArray<T>(name: string, jsonValue: unknown, callback: ValueConverter<T>): Promise<T[]> {
     const out: T[] = []
 
     if (!Array.isArray(jsonValue)) {
@@ -143,11 +151,17 @@ async function requireArray<T>(name: string, jsonValue: unknown, callback: (name
         try {
             out.push(await callback(name, value))
         } catch (cause) {
-            throw { error: `Error parsing ${name} item #${i} (0-indexed)`, cause }
+            throw new Error(`Error parsing ${name} item #${i} (0-indexed): ${cause}`)
         }
     }
 
     return out
+}
+
+async function optionalArray<T>(name: string, jsonValue: unknown, callback: ValueConverter<T>): Promise<T[]> {
+    if (jsonValue === undefined) return []
+
+    return await requireArray(name, jsonValue, callback)
 }
 
 async function requireUserTimeline(name: string, value: unknown): Promise<UserTimeline> {
@@ -161,6 +175,22 @@ async function requireUserTimeline(name: string, value: unknown): Promise<UserTi
         skipReplies: defaultBool("skipReplies", record.skipReplies, false),
         skipRetweets: defaultBool("skipRetweets", record.skipRetweets, false),
     }
+}
+
+// See: https://help.twitter.com/en/managing-your-account/twitter-username-rules
+const TWITTER_SCREEN_NAME_PAT = /^[a-z0-9_]{2,15}$/i
+
+// deno-lint-ignore require-await
+async function requireScreenName(_name: string, value: unknown): Promise<string> {
+    if (typeof value !== "string") {
+        throw new Error(`Expected a string but got ${typeof value}`)
+    }
+
+    if (!TWITTER_SCREEN_NAME_PAT.exec(value)) {
+        throw new Error(`"${value}" is not a valid twitter name.`)
+    }
+
+    return value
 }
 
 function defaultBool(name: string, value: unknown, defaultVal: boolean): boolean {

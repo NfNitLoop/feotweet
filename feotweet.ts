@@ -7,7 +7,7 @@ import { htmlToMarkdown } from "./priv/markdown.ts"
 
 
 async function main(options: MainOptions): Promise<void> {
-    logger.debug(() => `Log level: ${logger.level}`)
+    logger.debug(() => `Log level: ${logger.levelName}`)
     logger.debug(() => `Loading config`)
 
     const config = await loadConfig(options.config)
@@ -31,13 +31,20 @@ async function syncHomeTimeline(options: MainOptions, config: Config): Promise<v
     const userID = feoblog.UserID.fromString(config.twitter.homeTimeline.userID)
     const lastTimestamp = await getLatestTimestamp(fbClient, userID)
 
+    const skipUsers = new Set(config.twitter.homeTimeline.skipUsers.map(name => name.toLowerCase()))
+
     // Collect tweets we haven't saved yet:
     const tClient = new twitter.Client(config.twitter)
     const newTweets: Tweet[] = []
     for await (const tweetJSON of tClient.homeTimeline()) {
         const tweet = new Tweet(tweetJSON)
         if (!tweet.isPublic) {
-            logger.info(() => `skipping private tweet: ${tweet.url}`)
+            logger.debug(() => `skipping private tweet: ${tweet.url}`)
+            continue
+        }
+
+        if (skipUsers.has(tweet.user.json.screen_name.toLowerCase())) {
+            logger.debug(() => `Skipping tweet by this user: ${tweet.url}`)
             continue
         }
 
@@ -514,7 +521,6 @@ function replaceMatch(original: string, match: RegExpMatchArray, newValue: strin
 
 const MENTION_PAT = /(?<=\s|^)@([a-z0-9_]{2,15})/i
 const URL_PAT = /(?<=\s|^)(https?:\/\/[^"\s]+)/i
-const URL_SEARCH_STRING = /[?].*$/
 
 type TweetType = "simple"|"reply"|"retweet"|"quoteTweet"
 

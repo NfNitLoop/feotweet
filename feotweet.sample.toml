@@ -20,7 +20,6 @@ server = "http://127.0.0.1:8080"
 userID = ""
 password = ""
 
-# TODO
 # Don't bother syncing tweets/retweets/quote-tweets from these twitter users:
 skipUsers = [
     "chattyMcChatterson",
@@ -29,14 +28,16 @@ skipUsers = [
 [[twitter.userTimelines]]
 twitterScreenName = "twitterName"
 
-# Sync all tweets from the above timeline to a particular FeoBlog.
+# Sync all tweets from the above user to a this FeoBlog user.
 # Note: We use the timestamps of posts to know where to pick up sync, so
-# don't re-use the userID from homeTimeline, or between 
+# this FeoBlog userID should contain *only* these sync'd posts:
 userID = ""
 password = ""
 
 # Should we copy attachments into FeoBlog? (Default: false)
+# Note: this ONLY copies attachments from $twitterScreeName, not quote tweets
+# or retweets. (Those add up quick!)
 copyAttachments = true
 
-skipReplies = true # default false
-skipRetweets = true # default false
+skipReplies = false # default
+skipRetweets = false # default
