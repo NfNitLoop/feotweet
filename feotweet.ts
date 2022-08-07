@@ -533,7 +533,9 @@ function replaceMatch(original: string, match: RegExpMatchArray, newValue: strin
     )
 }
 
-const MENTION_PAT = /\b@([a-z0-9_]{2,15})\b/g
+// Note: can't use \b before @ because @ is not a "word character", so does not make a word boundary.
+const MENTION_PAT = /(?<=^[.]?|\s)@([a-z0-9_]{2,15})/gi
+
 const URL_PAT = /\bhttps?:\/\/[^)"\s]+/g
 
 type TweetType = "simple"|"reply"|"retweet"|"quoteTweet"

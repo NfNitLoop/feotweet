@@ -28,7 +28,40 @@ Deno.test("HTML Links", async () => {
     assertEquals(actual, expected)
 })
 
+Deno.test("Link @mentions", async () => {
+    let actual = await getHtml("@foo and @bar should be linked")
 
+    let expected = [
+        `<p><a href="https://twitter.com/TestUser">@TestUser</a> ("Test user")`,
+        ` <a href="https://twitter.com/TestUser/status/0000">wrote</a>:`,
+        `<blockquote><p><a href="https://twitter.com/foo">@foo</a> and <a href="https://twitter.com/bar">@bar</a> should be linked</blockquote>`
+    ].join('')
+
+    assertEquals(actual, expected)
+})
+
+Deno.test("Link initial .@mentions", async () => {
+    let actual = await getHtml(".@foo, but not .@bar should be linked")
+
+    let expected = [
+        `<p><a href="https://twitter.com/TestUser">@TestUser</a> ("Test user")`,
+        ` <a href="https://twitter.com/TestUser/status/0000">wrote</a>:`,
+        `<blockquote><p>.<a href="https://twitter.com/foo">@foo</a>, but not .@bar should be linked</blockquote>`
+    ].join('')
+
+    assertEquals(actual, expected)
+})
+
+async function getHtml(input: string): Promise<string> {
+    let json = tweetWithBody(input)
+    let tweet = new Tweet(json)
+    const attachments = new NoOpAttachmentColletor()
+    return await tweet.toHTML({attachments})
+}
+
+
+
+// TODO: Rename:
 function tweetWithBody(body: string): TweetJSON {
     return {
         id_str: "0000",
